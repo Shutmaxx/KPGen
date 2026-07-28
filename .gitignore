@@ -1,0 +1,29 @@
+# Сборки
+build/
+dist/
+dist_installer/
+*.spec.bak
+
+# Установщик Ollama — 1,5 ГБ, скачивается отдельно с ollama.com
+installer/redist/
+
+# Результаты тестовых прогонов
+_test_output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Среда разработки
+.vscode/
+.idea/
+
+# Временные файлы Office
+~$*
+
+# Системные
+Thumbs.db
+desktop.ini
