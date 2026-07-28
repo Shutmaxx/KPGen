@@ -180,7 +180,14 @@ QLineEdit#inn {{
     font-size: 20px;
     font-weight: 600;
     letter-spacing: 2px;
-    padding: 12px 14px;
+    padding: 10px 14px;
+    min-height: 30px;
+}}
+
+QPushButton#lookup {{
+    font-size: 14px;
+    padding: 10px 26px;
+    min-height: 30px;
 }}
 
 QComboBox::drop-down {{

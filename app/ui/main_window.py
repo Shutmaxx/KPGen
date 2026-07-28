@@ -177,9 +177,16 @@ class MainWindow(QWidget):
         self.inn_edit.setObjectName("inn")
         self.inn_edit.setPlaceholderText("ИНН: 10 или 12 цифр")
         self.inn_edit.setMaxLength(12)
+        # Высота задаётся явно: крупный шрифт с отступами иначе обрезается.
+        self.inn_edit.setMinimumHeight(54)
+        self.inn_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.inn_edit.returnPressed.connect(self._lookup_company)
+
         self.lookup_button = QPushButton("Найти")
         self.lookup_button.setObjectName("primary")
+        self.lookup_button.setMinimumHeight(54)
+        self.lookup_button.setMinimumWidth(130)
+        self.lookup_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.lookup_button.clicked.connect(self._lookup_company)
         search_row.addWidget(self.inn_edit, 1)
         search_row.addWidget(self.lookup_button)
