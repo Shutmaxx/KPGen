@@ -39,28 +39,27 @@ def safe_folder_name(name: str) -> str:
     return (cleaned or "Компания")[:80]
 
 
-def build_company_description(company: Company) -> str:
-    """Нейтральное описание клиента строго по данным реестра."""
-    industry = company.industry_phrase()
-    region = company.region
+def build_segment_value(company: Company, analysis: CallAnalysis) -> str:
+    """Чем площадка полезна компании этого профиля.
 
-    sentence = f"{company.display_name} — {industry}"
-    if region:
-        sentence += f", работающее в регионе: {region}"
-    sentence += "."
-
+    Регион и адрес сознательно не используются: в КП важна отраслевая
+    польза, а не география клиента.
+    """
+    value = (analysis.segment_value or "").strip().rstrip(".")
+    if value:
+        return value + "."
     return (
-        f"{sentence} Мы понимаем, что для предприятия такого масштаба закупки — "
-        f"это непрерывный поток процедур, а ресурс отдела снабжения всегда ограничен."
+        f"{company.industry_phrase()}, для которого закупки — "
+        f"это непрерывный поток процедур."
     )
 
 
 def _placeholder_map(company: Company, analysis: CallAnalysis,
                      manager: Manager) -> dict[str, str]:
     return {
-        "{{ОПИСАНИЕ_КОМПАНИИ}}": build_company_description(company),
-        "{{КОНТЕКСТ_РАЗГОВОРА}}": analysis.call_context,
-        "{{ИТОГ_РАЗГОВОРА}}": analysis.outcome,
+        "{{ПОЛЬЗА_В_СЕГМЕНТЕ}}": build_segment_value(company, analysis),
+        "{{ПОТРЕБНОСТИ_КЛИЕНТА}}": analysis.client_needs,
+        "{{ЧТО_ПРЕДЛАГАЕМ}}": analysis.our_offer,
         "{{КОМПАНИЯ_КРАТКО}}": company.display_name,
         "{{КОМПАНИЯ_ПОЛНОЕ}}": company.name_full or company.display_name,
         "{{ИНН}}": company.inn,
@@ -220,9 +219,124 @@ def _replace_contacts(slide, manager: Manager) -> None:
                     run.font.color.rgb = template_run.font.color.rgb
 
 
+def _add_benefits_slide(presentation, company: Company,
+                        benefits: list[str]) -> None:
+    """Добавляет слайд с преимуществами под задачи клиента.
+
+    Слайд собирается в фирменных цветах ЕСТП и ставится сразу после
+    титульного, чтобы клиент увидел выгоду до общих разделов.
+    """
+    if not benefits:
+        return
+
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Pt
+
+    dark = RGBColor(0x4E, 0x5C, 0x6B)
+    text_color = RGBColor(0x3A, 0x3A, 0x3A)
+    accent = RGBColor(0x5E, 0xAE, 0xC4)
+    muted = RGBColor(0x6B, 0x72, 0x7A)
+
+    width = presentation.slide_width
+    height = presentation.slide_height
+
+    # Берём макет из шаблона: у фирменных презентаций он обычно один,
+    # поэтому обращаться к «пустому макету» по индексу нельзя.
+    layouts = presentation.slide_layouts
+    existing = list(presentation.slides)
+    if existing:
+        layout = existing[0].slide_layout
+    elif len(layouts) > 6:
+        layout = layouts[6]
+    else:
+        layout = layouts[0]
+
+    slide = presentation.slides.add_slide(layout)
+    # Плейсхолдеры макета не нужны — слайд собирается вручную.
+    for shape in list(slide.placeholders):
+        shape._element.getparent().remove(shape._element)
+
+    # Заголовок
+    title_box = slide.shapes.add_textbox(
+        Emu(int(width * 0.06)), Emu(int(height * 0.08)),
+        Emu(int(width * 0.88)), Emu(int(height * 0.16)))
+    title_frame = title_box.text_frame
+    title_frame.word_wrap = True
+    title_paragraph = title_frame.paragraphs[0]
+    title_run = title_paragraph.add_run()
+    title_run.text = "ЧТО МЫ ПРЕДЛАГАЕМ"
+    title_run.font.size = Pt(28)
+    title_run.font.bold = True
+    title_run.font.color.rgb = dark
+    title_run.font.name = "Arial"
+
+    subtitle_box = slide.shapes.add_textbox(
+        Emu(int(width * 0.06)), Emu(int(height * 0.23)),
+        Emu(int(width * 0.88)), Emu(int(height * 0.09)))
+    subtitle_frame = subtitle_box.text_frame
+    subtitle_frame.word_wrap = True
+    subtitle_run = subtitle_frame.paragraphs[0].add_run()
+    subtitle_run.text = f"Под задачи {company.display_name}"
+    subtitle_run.font.size = Pt(14)
+    subtitle_run.font.color.rgb = muted
+    subtitle_run.font.name = "Arial"
+
+    # Пункты преимуществ
+    top = int(height * 0.36)
+    step = int(height * 0.13)
+    for index, benefit in enumerate(benefits[:4]):
+        marker = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Emu(int(width * 0.07)), Emu(top + index * step),
+            Emu(int(width * 0.022)), Emu(int(height * 0.045)))
+        marker.fill.solid()
+        marker.fill.fore_color.rgb = accent
+        marker.line.fill.background()
+        marker.shadow.inherit = False
+
+        text_box = slide.shapes.add_textbox(
+            Emu(int(width * 0.11)), Emu(top + index * step - int(height * 0.012)),
+            Emu(int(width * 0.82)), Emu(int(height * 0.09)))
+        frame = text_box.text_frame
+        frame.word_wrap = True
+        run = frame.paragraphs[0].add_run()
+        run.text = benefit
+        run.font.size = Pt(16)
+        run.font.color.rgb = text_color
+        run.font.name = "Arial"
+
+    # Декоративная «волна» в фирменном стиле
+    wave = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL,
+        Emu(int(width * 0.78)), Emu(int(height * 0.86)),
+        Emu(int(width * 0.4)), Emu(int(height * 0.34)))
+    wave.fill.solid()
+    wave.fill.fore_color.rgb = accent
+    wave.line.fill.background()
+    wave.shadow.inherit = False
+
+    brand_box = slide.shapes.add_textbox(
+        Emu(int(width * 0.03)), Emu(int(height * 0.03)),
+        Emu(int(width * 0.2)), Emu(int(height * 0.05)))
+    brand_run = brand_box.text_frame.paragraphs[0].add_run()
+    brand_run.text = "ESTP.RU"
+    brand_run.font.size = Pt(10)
+    brand_run.font.color.rgb = muted
+    brand_run.font.name = "Arial"
+
+    # Переносим слайд на третью позицию — сразу после титульного клиента.
+    slide_ids = presentation.slides._sldIdLst
+    new_slide = slide_ids[-1]
+    slide_ids.remove(new_slide)
+    slide_ids.insert(2, new_slide)
+
+
 def generate_presentation(template_path: str | Path, output_path: Path,
                           company: Company, manager: Manager,
-                          logo_path: str | Path | None = None) -> Path:
+                          logo_path: str | Path | None = None,
+                          benefits: list[str] | None = None) -> Path:
     """Собирает презентацию: титул клиента, логотип, контакты менеджера."""
     template = Path(template_path)
     if not template.exists():
@@ -253,6 +367,7 @@ def generate_presentation(template_path: str | Path, output_path: Path,
     _replace_slide_text(client_slide, company)
     _replace_client_logo(client_slide, logo)
     _replace_contacts(slides[-1], manager)
+    _add_benefits_slide(presentation, company, benefits or [])
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -278,7 +393,8 @@ def generate_all(company: Company, analysis: CallAnalysis, manager: Manager,
     kp_path = generate_kp(kp_template, folder / "Коммерческое предложение.docx",
                           company, analysis, manager)
     pres_path = generate_presentation(presentation_template, folder / "Презентация.pptx",
-                                      company, manager, logo_path)
+                                      company, manager, logo_path,
+                                      benefits=analysis.benefits)
 
     summary_path = folder / "Выжимка разговора.txt"
     summary_path.write_text(analysis.summary + "\n", encoding="utf-8")

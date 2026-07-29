@@ -36,22 +36,34 @@ def iter_paragraphs(doc: DocxDocument) -> Iterable[Paragraph]:
 
 
 def replace_in_paragraph(paragraph: Paragraph, old: str, new: str) -> bool:
-    """Заменяет подстроку в абзаце, сохраняя формат первого затронутого run.
+    """Заменяет подстроку в абзаце, сохраняя оформление.
+
+    Сначала подстановка выполняется внутри отдельных фрагментов (runs) —
+    так сохраняется разное начертание в одном абзаце, например жирное
+    название компании и обычный текст после него. Склейка всего абзаца
+    применяется только тогда, когда плейсхолдер разорван между фрагментами.
 
     Возвращает True, если замена произошла.
     """
-    full = "".join(run.text for run in paragraph.runs)
-    if old not in full:
-        return False
-
-    replaced = full.replace(old, new)
-
     runs = paragraph.runs
     if not runs:
         return False
 
-    # Текст целиком уходит в первый run — он задаёт начертание всего абзаца.
-    runs[0].text = replaced
+    # Обычный случай: плейсхолдер целиком лежит в одном фрагменте.
+    replaced_inside = False
+    for run in runs:
+        if old in run.text:
+            run.text = run.text.replace(old, new)
+            replaced_inside = True
+    if replaced_inside:
+        return True
+
+    # Запасной путь: Word разорвал плейсхолдер между фрагментами.
+    full = "".join(run.text for run in runs)
+    if old not in full:
+        return False
+
+    runs[0].text = full.replace(old, new)
     for run in runs[1:]:
         run.text = ""
     return True

@@ -28,10 +28,11 @@ DST_KP = TEMPLATES / "kp_template.docx"
 DST_PRES = TEMPLATES / "presentation_template.pptx"
 
 # Абзац -> плейсхолдер. Индексы выверены по исходному файлу.
+# Абзац 2 собирается особо: краткое название выделяется жирным,
+# остальной текст — обычным начертанием.
 PARAGRAPH_PLACEHOLDERS = {
-    2: "{{ОПИСАНИЕ_КОМПАНИИ}}",
-    3: "{{КОНТЕКСТ_РАЗГОВОРА}}",
-    18: "{{ИТОГ_РАЗГОВОРА}}",
+    3: "{{ПОТРЕБНОСТИ_КЛИЕНТА}}",
+    18: "{{ЧТО_ПРЕДЛАГАЕМ}}",
     20: "{{МЕНЕДЖЕР_ФИО}}",
     21: "{{МЕНЕДЖЕР_ДОЛЖНОСТЬ}}",
     22: "{{МЕНЕДЖЕР_ТЕЛЕФОН_1}}",
@@ -41,11 +42,51 @@ PARAGRAPH_PLACEHOLDERS = {
     26: "{{МЕНЕДЖЕР_САЙТ}}",
 }
 
+# Абзац с описанием компании: жирное название + обычный текст.
+COMPANY_PARAGRAPH = 2
+COMPANY_BOLD_PLACEHOLDER = "{{КОМПАНИЯ_КРАТКО}}"
+COMPANY_TAIL_PLACEHOLDER = " — {{ПОЛЬЗА_В_СЕГМЕНТЕ}}"
+
 # Точечные замены упоминаний конкретного клиента в статичных блоках.
-# Абзац 18 сюда не входит: он целиком заменяется на {{ИТОГ_РАЗГОВОРА}}.
 INLINE_REPLACEMENTS = [
     ("корпоративный портал «Фанагории»", "корпоративный портал {{КОМПАНИЯ_КРАТКО}}"),
 ]
+
+# Замена текста готовых блоков по требованию менеджера.
+BLOCK_REPLACEMENTS = [
+    (
+        "доступны тарифы на 3, 6 и 12 месяцев",
+        "доступны стандартные тарифы на 3 и 6 месяцев",
+    ),
+    (
+        "Отдельно отмечу: участие в Ваших процедурах бесплатно для поставщиков, "
+        "а с победителя торгов мы не удерживаем комиссию.",
+        "Отдельно отмечу: участие в Ваших процедурах по стандартным тарифам — "
+        "бесплатно для поставщиков и с победителя торгов мы не удерживаем комиссию.",
+    ),
+]
+
+
+def _build_company_paragraph(paragraph) -> None:
+    """Абзац о клиенте: жирное краткое название, дальше обычный текст."""
+    runs = paragraph.runs
+    if not runs:
+        paragraph.add_run(COMPANY_BOLD_PLACEHOLDER)
+        paragraph.add_run(COMPANY_TAIL_PLACEHOLDER)
+        return
+
+    first = runs[0]
+    first.text = COMPANY_BOLD_PLACEHOLDER
+    first.bold = True
+    for run in runs[1:]:
+        run.text = ""
+
+    tail = paragraph.add_run(COMPANY_TAIL_PLACEHOLDER)
+    tail.bold = False
+    tail.font.name = first.font.name
+    tail.font.size = first.font.size
+    if first.font.color and first.font.color.rgb is not None:
+        tail.font.color.rgb = first.font.color.rgb
 
 
 def build_kp_template() -> None:
@@ -61,7 +102,9 @@ def build_kp_template() -> None:
             raise IndexError(f"В шаблоне КП нет абзаца №{index}")
         set_paragraph_text(paragraphs[index], placeholder)
 
-    for old, new in INLINE_REPLACEMENTS:
+    _build_company_paragraph(paragraphs[COMPANY_PARAGRAPH])
+
+    for old, new in INLINE_REPLACEMENTS + BLOCK_REPLACEMENTS:
         for paragraph in paragraphs:
             replace_in_paragraph(paragraph, old, new)
 
@@ -88,6 +131,8 @@ def main() -> None:
     text = "\n".join(p.text for p in doc.paragraphs)
     missing = [ph for ph in PARAGRAPH_PLACEHOLDERS.values() if ph not in text]
     missing += [new for _, new in INLINE_REPLACEMENTS if new not in text]
+    missing += [ph for ph in (COMPANY_BOLD_PLACEHOLDER, "{{ПОЛЬЗА_В_СЕГМЕНТЕ}}")
+                if ph not in text]
     if missing:
         print("ВНИМАНИЕ, не найдены плейсхолдеры:", ", ".join(missing))
     else:
