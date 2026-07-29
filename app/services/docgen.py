@@ -40,18 +40,25 @@ def safe_folder_name(name: str) -> str:
 
 
 def build_segment_value(company: Company, analysis: CallAnalysis) -> str:
-    """Чем площадка полезна компании этого профиля.
+    """Характеристика компании в её отрасли — продолжение названия.
 
-    Регион и адрес сознательно не используются: в КП важна отраслевая
-    польза, а не география клиента.
+    Возвращает текст вместе с разделителем: после названия ставится тире,
+    если фраза начинается с описания, и пробел — если с глагола
+    («является одним из…»), иначе получится «Компания — является».
+    Регион и адрес не используются: в КП важна отрасль, а не география.
     """
     value = (analysis.segment_value or "").strip().rstrip(".")
-    if value:
-        return value + "."
-    return (
-        f"{company.industry_phrase()}, для которого закупки — "
-        f"это непрерывный поток процедур."
-    )
+    if not value:
+        value = (f"{company.industry_phrase()}, для которого закупки — "
+                 f"это непрерывный поток процедур")
+
+    value = value.lstrip("—–- ").strip()
+    starts_with_verb = value.lower().startswith(
+        ("является", "занимает", "работает", "производит", "выпускает",
+         "специализируется", "входит", "обеспечивает", "поставляет"))
+
+    separator = " " if starts_with_verb else " — "
+    return f"{separator}{value}."
 
 
 def _placeholder_map(company: Company, analysis: CallAnalysis,
@@ -74,8 +81,40 @@ def _placeholder_map(company: Company, analysis: CallAnalysis,
     }
 
 
+def _remove_iframe_block(document) -> None:
+    """Убирает абзацы про i-frame, когда у компании нет сайта.
+
+    Предлагать модуль для сайта, которого нет, — заведомо неуместно,
+    поэтому весь блок вместе с его пунктами удаляется из письма.
+    """
+    from .docx_utils import iter_paragraphs
+
+    paragraphs = list(document.paragraphs)
+    start = None
+    for index, paragraph in enumerate(paragraphs):
+        if paragraph.text.strip().startswith("Бренд и безопасность"):
+            start = index
+            break
+    if start is None:
+        return
+
+    # Блок заканчивается перед следующим смысловым разделом.
+    end = len(paragraphs)
+    for index in range(start + 1, len(paragraphs)):
+        text = paragraphs[index].text.strip()
+        if text.startswith(("Индивидуальный расчёт", "Экономическая выгода",
+                            "Почему работа")):
+            end = index
+            break
+
+    for paragraph in paragraphs[start:end]:
+        element = paragraph._p
+        element.getparent().remove(element)
+
+
 def generate_kp(template_path: str | Path, output_path: Path, company: Company,
-                analysis: CallAnalysis, manager: Manager) -> Path:
+                analysis: CallAnalysis, manager: Manager,
+                has_website: bool = True) -> Path:
     """Собирает КП из шаблона, сохраняя бланк и оформление."""
     template = Path(template_path)
     if not template.exists():
@@ -91,6 +130,9 @@ def generate_kp(template_path: str | Path, output_path: Path, company: Company,
             f"Не удалось открыть шаблон КП «{template.name}». "
             f"Возможно, файл повреждён или занят другой программой. Причина: {exc}"
         ) from exc
+
+    if not has_website:
+        _remove_iframe_block(document)
 
     replace_everywhere(document, _placeholder_map(company, analysis, manager))
 
@@ -175,7 +217,11 @@ def _replace_client_logo(slide, logo_path: Path | None) -> None:
 
 
 def _replace_contacts(slide, manager: Manager) -> None:
-    """Подставляет контакты менеджера на последнем слайде."""
+    """Подставляет контакты менеджера на последнем слайде.
+
+    В шаблоне все контакты обычно лежат в одной фигуре вместе с почтой,
+    поэтому e-mail обязательно входит в список строк — иначе он пропадёт.
+    """
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
@@ -183,15 +229,20 @@ def _replace_contacts(slide, manager: Manager) -> None:
         if "@" not in text and "+7" not in text:
             continue
 
-        lines = [
-            manager.full_name,
-            manager.position,
-            manager.phone_1,
-            manager.phone_2,
-            manager.phone_3,
-        ]
+        # Почта вынесена в отдельную фигуру — заменяем только её.
         if "@" in text and len(text.strip().splitlines()) <= 2:
             lines = [manager.email]
+        else:
+            lines = [
+                manager.full_name,
+                manager.position,
+                manager.phone_1,
+                manager.phone_2,
+                manager.phone_3,
+            ]
+            # Если почта была в этой же фигуре, возвращаем её на место.
+            if "@" in text:
+                lines.append(manager.email)
 
         frame = shape.text_frame
         first = frame.paragraphs[0]
@@ -385,13 +436,14 @@ def generate_presentation(template_path: str | Path, output_path: Path,
 def generate_all(company: Company, analysis: CallAnalysis, manager: Manager,
                  kp_template: str, presentation_template: str, output_root: str,
                  logo_path: str | None = None,
-                 transcript: str = "") -> GeneratedFiles:
+                 transcript: str = "",
+                 has_website: bool = True) -> GeneratedFiles:
     """Готовит все файлы по одному разговору в отдельной папке."""
     folder = Path(output_root) / f"{safe_folder_name(company.display_name)}_{date.today():%Y-%m-%d}"
     folder.mkdir(parents=True, exist_ok=True)
 
     kp_path = generate_kp(kp_template, folder / "Коммерческое предложение.docx",
-                          company, analysis, manager)
+                          company, analysis, manager, has_website=has_website)
     pres_path = generate_presentation(presentation_template, folder / "Презентация.pptx",
                                       company, manager, logo_path,
                                       benefits=analysis.benefits)

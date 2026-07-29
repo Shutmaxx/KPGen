@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from ..services import analyze, docgen, normalize, transcribe
+from ..services import analyze, docgen, normalize, transcribe, website
 from ..services.dadata import Company
 from ..services.settings import Settings
 
@@ -90,8 +90,21 @@ class ProcessWorker(QObject):
             if self._cancelled:
                 return
 
-            # --- 4. Документы (90–100 %) ---
-            self.progress.emit(92, "Сборка документов",
+            # --- 4. Сайт компании (90–92 %) ---
+            self.progress.emit(90, "Проверка сайта",
+                               "Ищу корпоративный сайт компании…")
+            site = website.find_website(request.company.display_name,
+                                        request.company.inn)
+            if site.found:
+                analysis.notes.append(f"Найден сайт компании: {site.url}")
+            else:
+                analysis.notes.append(
+                    "Сайт компании не найден — абзац про модуль для сайта "
+                    "убран из предложения."
+                )
+
+            # --- 5. Документы (92–100 %) ---
+            self.progress.emit(93, "Сборка документов",
                                "Формирую КП и презентацию…")
             files = docgen.generate_all(
                 request.company, analysis, settings.manager,
@@ -99,6 +112,7 @@ class ProcessWorker(QObject):
                 settings.output_dir,
                 logo_path=request.logo_path,
                 transcript=result.text_with_timecodes,
+                has_website=site.found,
             )
 
             self.progress.emit(100, "Готово", "Документы сформированы")
